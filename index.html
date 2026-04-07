@@ -238,6 +238,11 @@
     <div class="filter-heading">Sector</div>
     <select id="filter-sector" multiple placeholder="All sectors…"></select>
 
+    <!-- Fund Focus (only relevant for Fund Investment rows) -->
+    <div class="filter-heading">Fund Focus Sector</div>
+    <div style="font-size:.68rem;color:#475569;margin-bottom:.3rem;">For fund investments only — what the fund invests in</div>
+    <select id="filter-fund-focus" multiple placeholder="All focus sectors…"></select>
+
     <!-- Status -->
     <div class="filter-heading">Status</div>
     <select id="filter-status" multiple placeholder="All statuses…"></select>
@@ -332,6 +337,7 @@
               <th>Country</th>
               <th>Region</th>
               <th>Sector</th>
+              <th>Fund Focus</th>
               <th>Type</th>
               <th>Amount (USD)</th>
               <th>Status</th>
@@ -538,6 +544,12 @@ function initFilters() {
   });
   makeTomSelect('filter-country', Array.from(allCountries).sort());
   makeTomSelect('filter-sector',  uniqueSorted('sector_standardized', allData));
+  // Fund focus: only show values that exist (exclude blank/nan); sort
+  const fundFocusValues = [...new Set(
+    allData.map(r => (r.fund_focus_sector || '').trim())
+           .filter(v => v && v !== 'nan')
+  )].sort();
+  makeTomSelect('filter-fund-focus', fundFocusValues);
   makeTomSelect('filter-status',  uniqueSorted('status_standardized', allData));
   makeTomSelect('filter-invtype', uniqueSorted('investment_type_standardized', allData));
 
@@ -574,12 +586,13 @@ function getArr(id) { return tsInstances[id] ? tsInstances[id].getValue() : []; 
 function getNum(id) { const v = document.getElementById(id).value; return v === '' ? null : parseFloat(v); }
 
 function applyFilters() {
-  const dfis     = getArr('filter-dfi');
-  const regions  = getArr('filter-region');
-  const countries= getArr('filter-country');
-  const sectors  = getArr('filter-sector');
-  const statuses = getArr('filter-status');
-  const invTypes = getArr('filter-invtype');
+  const dfis      = getArr('filter-dfi');
+  const regions   = getArr('filter-region');
+  const countries = getArr('filter-country');
+  const sectors   = getArr('filter-sector');
+  const fundFocus = getArr('filter-fund-focus');
+  const statuses  = getArr('filter-status');
+  const invTypes  = getArr('filter-invtype');
   const amtMin   = getNum('amount-min');
   const amtMax   = getNum('amount-max');
   const yrMin    = getNum('year-min');
@@ -597,8 +610,9 @@ function applyFilters() {
       const rowCountries = (r.country_standardized||'').split(';').map(s => s.trim());
       if (!countries.some(c => rowCountries.includes(c))) return false;
     }
-    if (sectors.length  && !sectors.includes(r.sector_standardized))              return false;
-    if (statuses.length && !statuses.includes(r.status_standardized))             return false;
+    if (sectors.length    && !sectors.includes(r.sector_standardized))            return false;
+    if (fundFocus.length  && !fundFocus.includes(r.fund_focus_sector))            return false;
+    if (statuses.length   && !statuses.includes(r.status_standardized))           return false;
     if (invTypes.length && !invTypes.includes(r.investment_type_standardized))    return false;
     if (amtMin !== null && (r._amount === null || r._amount < amtMin))            return false;
     if (amtMax !== null && (r._amount === null || r._amount > amtMax))            return false;
@@ -678,6 +692,9 @@ function buildTableRows(data) {
       escHtml(r.country_standardized || r.country || '—'),
       escHtml(r.region_standardized  || '—'),
       escHtml(r.sector_standardized  || r.sector || '—'),
+      r.fund_focus_sector && r.fund_focus_sector !== 'nan'
+        ? `<span style="font-size:.72rem;background:#1e3a5f20;color:#3b82f6;padding:.1rem .35rem;border-radius:.25rem;">${escHtml(r.fund_focus_sector)}</span>`
+        : '—',
       escHtml(r.investment_type_standardized || r.investment_type || '—'),
       `<span class="amount-cell">${amt}</span>`,
       statusBadge(r.status_standardized),
@@ -699,13 +716,13 @@ function updateTable() {
       data: rows,
       pageLength: 25,
       lengthMenu: [10, 25, 50, 100, 250],
-      order: [[7, 'desc']],
+      order: [[8, 'desc']],
       scrollX: true,
       dom: '<"d-flex align-items-center gap-2 mb-2"lf>t<"d-flex align-items-center justify-content-between mt-2"ip>',
       language: { search: '', searchPlaceholder: 'Filter table…', lengthMenu: 'Show _MENU_' },
       columnDefs: [
-        { targets: 7, className: 'amount-cell' },
-        { targets: [0,8,9], searchable: false },
+        { targets: 8, className: 'amount-cell' },
+        { targets: [0,6,9,10], searchable: false },
       ],
       drawCallback() {
         // Clicking a row country filters the map
