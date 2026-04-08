@@ -181,9 +181,54 @@
     #loading-overlay p { color: #e2e8f0; font-size: .95rem; }
     #loading-overlay.hidden { display: none; }
 
-    /* Responsive */
+    /* ── Mobile overlay backdrop ── */
+    #sidebar-backdrop {
+      display: none;
+      position: fixed; inset: 0; z-index: 1035;
+      background: rgba(0,0,0,.5);
+    }
+
+    /* ── Responsive ── */
     @media (max-width: 768px) {
-      #sidebar { position: fixed; top: var(--header-height); left: 0; bottom: 0; z-index: 1040; }
+      /* Sidebar is a fixed overlay; hidden by default on mobile */
+      #sidebar {
+        position: fixed; top: var(--header-height); left: 0; bottom: 0;
+        z-index: 1040;
+        margin-left: calc(-1 * var(--sidebar-width)); /* start hidden */
+        box-shadow: 4px 0 16px rgba(0,0,0,.4);
+      }
+      /* When sidebar is open on mobile (toggle removes .collapsed) */
+      #sidebar.mobile-open {
+        margin-left: 0;
+      }
+      /* Show backdrop when sidebar is open (controlled via JS adding body.sidebar-open) */
+      body.sidebar-open #sidebar-backdrop {
+        display: block;
+      }
+
+      /* Stats bar: 2-column grid on mobile */
+      #stats-bar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: .4rem .75rem;
+        padding: .5rem .85rem;
+      }
+      .stat-value { font-size: 1rem; }
+      .stat-label { font-size: .62rem; }
+
+      /* Content area: tighter padding */
+      #content-area { padding: .4rem .5rem; gap: .4rem; }
+
+      /* Toggle button label */
+      #sidebar-toggle-label { display: inline; margin-left: .35rem; font-size: .82rem; color: #93c5fd; vertical-align: middle; }
+
+      /* Header subtitle hidden on very small screens */
+      #header-subtitle { display: none; }
+    }
+
+    @media (min-width: 769px) {
+      #sidebar-toggle-label { display: none; }
+      /* Desktop: collapsed uses negative margin */
       #sidebar.collapsed { margin-left: calc(-1 * var(--sidebar-width)); }
     }
   </style>
@@ -201,7 +246,7 @@
 
 <!-- Header -->
 <header id="app-header">
-  <button id="sidebar-toggle" title="Toggle filters"><i class="bi bi-layout-sidebar"></i></button>
+  <button id="sidebar-toggle" title="Toggle filters"><i class="bi bi-layout-sidebar"></i><span id="sidebar-toggle-label">Filters</span></button>
   <div>
     <h1><i class="bi bi-globe-americas me-2"></i>DFI Transaction Dashboard</h1>
   </div>
@@ -209,6 +254,9 @@
     <span class="subtitle" id="header-subtitle">Loading…</span>
   </div>
 </header>
+
+<!-- Mobile sidebar backdrop -->
+<div id="sidebar-backdrop"></div>
 
 <!-- Main layout -->
 <div id="layout">
@@ -261,7 +309,7 @@
     <div style="font-size:.68rem;color:#475569;margin-top:.2rem;">Leave blank for no limit</div>
 
     <!-- Year range -->
-    <div class="filter-heading">Approval Year</div>
+    <div class="filter-heading">Year (Approval or Signing)</div>
     <div class="range-row">
       <input type="number" id="year-min" placeholder="From" min="1990" max="2030" />
       <span>–</span>
@@ -445,7 +493,7 @@ const DFI_COLORS = {
   IFC:"#1d4ed8",BII:"#7c3aed",DFC:"#b45309",FMO:"#0e7490",
   "IDB Invest":"#065f46",Proparco:"#be185d",Norfund:"#1e40af",
   Finnfund:"#166534","FinDev Canada":"#92400e",BIO:"#6d28d9",
-  DEG:"#0f766e",IFU:"#4338ca",SIFEM:"#b91c1c",
+  DEG:"#0f766e",IFU:"#4338ca",SIFEM:"#b91c1c",Swedfund:"#0d7377",
 };
 
 // ============================================================
@@ -459,6 +507,20 @@ let circleLayer = null;
 let tsInstances = {};
 let currentTab = 'table';
 
+// ── Mobile sidebar helpers (available globally) ──────────────────────────────
+function isMobile() { return window.innerWidth <= 768; }
+function closeSidebarAfterFilter() {
+  const sb = document.getElementById('sidebar');
+  if (isMobile() && sb && sb.classList.contains('mobile-open')) {
+    setTimeout(() => {
+      sb.classList.remove('mobile-open');
+      document.body.classList.remove('sidebar-open');
+      const bd = document.getElementById('sidebar-backdrop');
+      if (bd) bd.style.display = 'none';
+    }, 180);
+  }
+}
+
 // ============================================================
 // Load CSV
 // ============================================================
@@ -468,7 +530,9 @@ function setLoadingBar(pct) {
 
 function loadData() {
   setLoadingBar(10);
-  Papa.parse('data/DFI_Unified_Dataset.csv', {
+  // Cache-bust with current timestamp so the browser always fetches the latest CSV
+  const csvUrl = 'data/DFI_Unified_Dataset.csv?v=' + Date.now();
+  Papa.parse(csvUrl, {
     download: true,
     header: true,
     skipEmptyLines: true,
@@ -480,8 +544,9 @@ function loadData() {
       allData = results.data.map(row => {
         // Normalise amount
         row._amount = parseFloat(row.commitment_amount_usd) || null;
-        // Extract year from approval_date
-        const yr = row.approval_date ? String(row.approval_date).match(/\d{4}/) : null;
+        // Extract year — prefer approval_date, fall back to signing_date (e.g. FMO only has signing_date)
+        const dateStr = row.approval_date || row.signing_date || '';
+        const yr = dateStr ? String(dateStr).match(/\d{4}/) : null;
         row._year = yr ? parseInt(yr[0]) : null;
         // Display name
         row._displayName = row.client_name_canonical || row.client_name || row.project_name || '—';
@@ -520,7 +585,7 @@ function makeTomSelect(id, options, settings = {}) {
     plugins: ['remove_button', 'checkbox_options'],
     maxOptions: 500,
     placeholder: el.getAttribute('placeholder') || 'All…',
-    onChange: () => applyFilters(),
+    onChange: () => { applyFilters(); closeSidebarAfterFilter(); },
     ...settings,
   });
   options.forEach(v => ts.addOption({ value: v, text: v }));
@@ -557,25 +622,51 @@ function initFilters() {
   let debounce;
   document.getElementById('text-search').addEventListener('input', () => {
     clearTimeout(debounce);
-    debounce = setTimeout(applyFilters, 250);
+    debounce = setTimeout(() => { applyFilters(); closeSidebarAfterFilter(); }, 250);
   });
 
   // Range inputs
   ['amount-min','amount-max','year-min','year-max'].forEach(id => {
-    document.getElementById(id).addEventListener('input', () => applyFilters());
+    document.getElementById(id).addEventListener('input', () => { applyFilters(); closeSidebarAfterFilter(); });
   });
 
   // Checkboxes
-  document.getElementById('excl-gtfp').addEventListener('change', applyFilters);
-  document.getElementById('excl-multi').addEventListener('change', applyFilters);
+  document.getElementById('excl-gtfp').addEventListener('change', () => { applyFilters(); closeSidebarAfterFilter(); });
+  document.getElementById('excl-multi').addEventListener('change', () => { applyFilters(); closeSidebarAfterFilter(); });
 
   // Reset
   document.getElementById('reset-btn').addEventListener('click', resetFilters);
 
-  // Sidebar toggle
+  // ── Sidebar toggle (mobile vs desktop) ──────────────────────────────────────
+  const sidebar  = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+
+  function openSidebarMobile() {
+    sidebar.classList.add('mobile-open');
+    document.body.classList.add('sidebar-open');
+    backdrop.style.display = 'block';
+  }
+  function closeSidebarMobile() {
+    sidebar.classList.remove('mobile-open');
+    document.body.classList.remove('sidebar-open');
+    backdrop.style.display = 'none';
+  }
+
   document.getElementById('sidebar-toggle').addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('collapsed');
-    if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 300);
+    if (isMobile()) {
+      sidebar.classList.contains('mobile-open') ? closeSidebarMobile() : openSidebarMobile();
+    } else {
+      sidebar.classList.toggle('collapsed');
+      if (leafletMap) setTimeout(() => leafletMap.invalidateSize(), 300);
+    }
+  });
+
+  // Backdrop click closes sidebar on mobile
+  backdrop.addEventListener('click', closeSidebarMobile);
+
+  // Clean up mobile classes if window is resized to desktop width
+  window.addEventListener('resize', () => {
+    if (!isMobile()) closeSidebarMobile();
   });
 }
 
@@ -680,9 +771,12 @@ function dfiPill(d) {
 function buildTableRows(data) {
   return data.map(r => {
     const amt = r._amount ? '$' + (r._amount/1e6).toFixed(2) + 'M' : '—';
-    const projectCell = r.project_url
-      ? `<a class="project-link" href="${r.project_url}" target="_blank" rel="noopener" title="${escHtml(r.project_name||'')}">
-           ${escHtml((r.project_name||'').substring(0,45))}${(r.project_name||'').length>45?'…':''}
+    // Link text: prefer project_name; fall back to display name (e.g. FMO has no project_name)
+    const linkLabel = (r.project_name && r.project_name.trim() && r.project_name.trim() !== 'nan')
+      ? r.project_name.trim() : r._displayName;
+    const projectCell = r.project_url && r.project_url.trim() && r.project_url.trim() !== 'nan'
+      ? `<a class="project-link" href="${r.project_url}" target="_blank" rel="noopener" title="${escHtml(linkLabel)}">
+           ${escHtml(linkLabel.substring(0,45))}${linkLabel.length>45?'…':''}
          </a>`
       : escHtml((r.project_name||'').substring(0,45)) + ((r.project_name||'').length>45?'…':'');
     return [
