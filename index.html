@@ -341,7 +341,7 @@
       </div>
       <div class="stat-box">
         <span class="stat-value" id="stat-amount">–</span>
-        <span class="stat-label">Total Committed</span>
+        <span class="stat-label">Investment Total</span>
       </div>
       <div class="stat-box">
         <span class="stat-value" id="stat-countries">–</span>
@@ -905,7 +905,7 @@ function updateMap() {
     const popupHtml = `
       <h6>${country}</h6>
       <div class="popup-row"><span class="popup-label">Transactions</span><span class="popup-val">${fmtNum(data.count)}</span></div>
-      <div class="popup-row"><span class="popup-label">Total Committed</span><span class="popup-val">${fmtAmount(data.amount)}</span></div>
+      <div class="popup-row"><span class="popup-label">Investment Total</span><span class="popup-val">${fmtAmount(data.amount)}</span></div>
       <div class="popup-row"><span class="popup-label">Top Sector</span><span class="popup-val">${topSec ? topSec[0] : '—'}</span></div>
       <div class="popup-row"><span class="popup-label">DFIs</span><span class="popup-val">${Array.from(data.dfis).join(', ')}</span></div>
       <div style="margin-top:.4rem">
