@@ -1,6 +1,6 @@
 # DFI Transaction Dashboard
 
-An interactive browser-based dashboard for exploring DFI (Development Finance Institution) private investment transactions across 13 institutions: IFC, BII, DFC, IDB Invest, Proparco, FMO, Norfund, Finnfund, BIO, SIFEM, FinDev Canada, DEG, and IFU.
+An interactive browser-based dashboard for exploring DFI (Development Finance Institution) private investment transactions across 14 institutions: IFC, BII, DFC, IDB Invest, Proparco, FMO, Norfund, Finnfund, BIO, SIFEM, FinDev Canada, Swedfund, DEG, and IFU.
 
 ## Features
 
@@ -13,7 +13,7 @@ An interactive browser-based dashboard for exploring DFI (Development Finance In
 
 ## Data
 
-The dataset covers ~15,900 transactions across 13 DFIs with standardised taxonomy fields for region, sector, status, and investment type.
+The dataset covers ~15,900 transactions across 14 DFIs with standardised taxonomy fields for region, sector, status, and investment type.
 
 ## Setup
 
