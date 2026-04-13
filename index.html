@@ -742,7 +742,9 @@ function fmtNum(n) { return n.toLocaleString(); }
 
 function updateStats() {
   const total   = filteredData.reduce((s,r) => s + (r._amount || 0), 0);
-  const countries = new Set(filteredData.map(r => getCountryValue(r)).filter(Boolean));
+  const countries = new Set(
+    filteredData.flatMap(r => (getCountryValue(r) || '').split(';').map(s => s.trim()).filter(Boolean))
+  );
   const dfis    = new Set(filteredData.map(r => r.dfi_source).filter(Boolean));
   const clients = new Set(filteredData.map(r => r._displayName).filter(v => v !== '—'));
 
