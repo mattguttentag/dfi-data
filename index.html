@@ -613,7 +613,10 @@ function uniqueSorted(field, data) {
 }
 
 function getCountryValue(row) {
-  return String(row.country_standardized || row.country || '').trim();
+  // Use the standardized country only. We deliberately do NOT fall back to the
+  // raw `country` field — that field carries unstandardized/garbage values
+  // (e.g. "Redacted", "RDC", "Multi-Pays AFR") that standardization nulls out.
+  return String(row.country_standardized || '').trim();
 }
 
 function makeTomSelect(id, options, settings = {}) {
