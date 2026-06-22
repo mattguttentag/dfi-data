@@ -152,27 +152,6 @@
     .map-active #map-pane { display: block; }
     .map-active #table-pane { display: none; }
 
-    /* ── New Investments log tab ── */
-    #log-pane {
-      flex: 1; overflow: auto; background: #fff; border-radius: .5rem;
-      padding: .75rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,.08); display: none;
-    }
-    .log-active #log-pane   { display: block; }
-    .log-active #table-pane { display: none; }
-    .log-active #map-pane   { display: none; }
-    #log-pane h5 { font-size: .92rem; font-weight: 700; color: #1e3a5f; margin-bottom: .75rem; }
-    #log-pane .run-group { margin-bottom: 1.25rem; }
-    #log-pane .run-header {
-      font-size: .78rem; font-weight: 700; color: #3b82f6;
-      background: #eff6ff; padding: .3rem .7rem; border-radius: .3rem;
-      margin-bottom: .4rem; display: flex; gap: 1rem; align-items: baseline;
-    }
-    #log-pane .run-header .run-as-of { font-size: .72rem; color: #64748b; font-weight: 400; }
-    #log-pane .log-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
-    #log-pane .log-table th { background: #f8fafc; font-weight: 600; color: #374151; padding: .3rem .55rem; white-space: nowrap; border-bottom: 2px solid #e2e8f0; }
-    #log-pane .log-table td { padding: .28rem .55rem; color: #374151; border-bottom: 1px solid #f1f5f9; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
-    #log-pane .log-table tr:hover td { background: #eff6ff; }
-    #log-pane .no-log { color: #64748b; font-size: .84rem; margin-top: 1rem; }
 
     /* Leaflet popup */
     .leaflet-popup-content { font-size: .82rem; min-width: 180px; }
@@ -394,11 +373,7 @@
             <i class="bi bi-map me-1"></i>Map
           </a>
         </li>
-        <li class="nav-item">
-          <a class="nav-link" id="tab-log-btn" href="#" onclick="switchTab('log');return false;">
-            <i class="bi bi-plus-circle me-1"></i>New Investments
-          </a>
-        </li>
+
       </ul>
 
       <!-- Table pane -->
@@ -429,11 +404,6 @@
         <div id="map"></div>
       </div>
 
-      <!-- New Investments log pane -->
-      <div id="log-pane">
-        <h5><i class="bi bi-plus-circle me-2"></i>New Investments — Change Log</h5>
-        <div id="log-content"><p class="no-log">Loading…</p></div>
-      </div>
 
     </div><!-- /content-area -->
   </div><!-- /main -->
@@ -978,118 +948,15 @@ function switchTab(tab) {
   currentTab = tab;
   document.getElementById('tab-table-btn').classList.toggle('active', tab === 'table');
   document.getElementById('tab-map-btn').classList.toggle('active', tab === 'map');
-  document.getElementById('tab-log-btn').classList.toggle('active', tab === 'log');
   const contentArea = document.getElementById('content-area');
   contentArea.classList.toggle('map-active', tab === 'map');
-  contentArea.classList.toggle('log-active', tab === 'log');
   if (tab === 'map') {
     updateMap();
-  } else if (tab === 'log') {
-    loadNewInvestmentsLog();
   } else {
     if (dtTable) dtTable.draw();
   }
 }
 
-// ============================================================
-// New Investments log
-// ============================================================
-const BASELINE_DATE = '2026-04-06'; // initial import date — not shown as "new"
-let logLoaded = false;
-
-const _MONTHS = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
-
-// Parse an investment date from a row's signing/approval fields into {y, mo}.
-// DFIs use different conventions (BII/BIO are DD/MM, others MM/DD), so we use
-// dfi_source to disambiguate slash dates. Returns null if no date is found.
-function parseInvestmentDate(row) {
-  const dfi = row.dfi_source || '';
-  for (const fld of ['signing_date', 'approval_date']) {
-    const s = (row[fld] == null ? '' : String(row[fld])).trim();
-    if (!s || s.toLowerCase() === 'nan') continue;
-    let m;
-    if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)))            // ISO 2024-10-17
-      return { y: +m[1], mo: +m[2] };
-    if ((m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})/))) {  // 16-Mar-2026 (IFC)
-      const mo = _MONTHS[m[2].toLowerCase()];
-      if (mo) return { y: +m[3], mo };
-    }
-    if ((m = s.match(/^(\d{1,2})-(\d{4})$/)))                 // 05-2026 (DEG)
-      return { y: +m[2], mo: +m[1] };
-    if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/))) {    // a/b/YYYY
-      let a = +m[1], b = +m[2], mo = (dfi === 'BII' || dfi === 'BIO') ? b : a;
-      if (mo > 12) mo = (mo === a ? b : a);                   // safety swap
-      return { y: +m[3], mo };
-    }
-    if ((m = s.match(/(19|20)\d{2}/)))                        // year only
-      return { y: +m[0], mo: 12 };
-  }
-  return null;
-}
-
-function loadNewInvestmentsLog() {
-  if (logLoaded) return;
-  logLoaded = true;
-  renderNewInvestmentsLog();
-}
-
-function renderNewInvestmentsLog() {
-  const container = document.getElementById('log-content');
-
-  // "New" = added after the baseline import AND with an investment date within
-  // the last 12 months (excludes old investments re-added on a source refresh).
-  const now = new Date();
-  const cutY = now.getFullYear() - 1, cutMo = now.getMonth() + 1;
-  const withinLastYear = d => d && (d.y > cutY || (d.y === cutY && d.mo >= cutMo));
-
-  const groups = {};
-  allData.forEach(r => {
-    const d = (r.date_added || '').trim();
-    if (!d || d === BASELINE_DATE) return;
-    if (!withinLastYear(parseInvestmentDate(r))) return;
-    if (!groups[d]) groups[d] = [];
-    groups[d].push(r);
-  });
-
-  const sortedDates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
-
-  if (sortedDates.length === 0) {
-    container.innerHTML = '<p class="no-log">No new investments with a recent investment date have been added since the initial dataset import.</p>';
-    return;
-  }
-
-  let html = '<p style="font-size:.76rem;color:#64748b;margin:-.25rem 0 .75rem;">' +
-    'Shows investments added after the initial import whose investment date falls within the last 12 months.</p>';
-  sortedDates.forEach(date => {
-    const rows = groups[date];
-    html += `<div class="run-group">
-      <div class="run-header">
-        <span>Added: ${escHtml(date)}</span>
-        <span class="run-as-of">${rows.length} investment${rows.length !== 1 ? 's' : ''}</span>
-      </div>
-      <table class="log-table">
-        <thead><tr><th>DFI</th><th>Client</th><th>Project</th><th>Country</th><th>Sector</th><th>Amount (USD)</th></tr></thead>
-        <tbody>`;
-    rows.forEach(r => {
-      const amt = r._amount ? '$' + (r._amount / 1e6).toFixed(2) + 'M' : '—';
-      const label = (r.project_name || r._displayName || '—').substring(0, 50);
-      const projectCell = r.project_url && r.project_url.trim() && r.project_url.trim() !== 'nan'
-        ? `<a class="project-link" href="${escHtml(r.project_url)}" target="_blank" rel="noopener">${escHtml(label)}</a>`
-        : escHtml(label);
-      html += `<tr>
-        <td>${dfiPill(r.dfi_source || '')}</td>
-        <td title="${escHtml(r._displayName)}">${escHtml(r._displayName.substring(0, 35))}${r._displayName.length > 35 ? '…' : ''}</td>
-        <td>${projectCell}</td>
-        <td>${escHtml(getCountryValue(r) || '—')}</td>
-        <td>${escHtml(r.sector_standardized || r.sector || '—')}</td>
-        <td class="amount-cell">${amt}</td>
-      </tr>`;
-    });
-    html += `</tbody></table></div>`;
-  });
-
-  container.innerHTML = html;
-}
 
 // ============================================================
 // Reset
