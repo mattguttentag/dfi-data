@@ -871,8 +871,8 @@ function updateTable() {
       dom: '<"d-flex align-items-center gap-2 mb-2"lf>t<"d-flex align-items-center justify-content-between mt-2"ip>',
       language: { search: '', searchPlaceholder: 'Filter table…', lengthMenu: 'Show _MENU_' },
       columnDefs: [
-        { targets: 8, className: 'amount-cell', type: 'num-blanks-last' },
-        { targets: 10, type: 'num-blanks-last' },
+        { targets: 8, className: 'amount-cell', type: 'num-blanks-last', render: {_: '_', sort: 'sort', filter: '_'} },
+        { targets: 10, type: 'num-blanks-last', render: {_: '_', sort: 'sort', filter: '_'} },
         { targets: [1,2,3,4,5,6,7,11], type: 'str-blanks-last' },
         { targets: [0,9], searchable: false },
       ],
