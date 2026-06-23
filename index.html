@@ -781,6 +781,46 @@ function dfiPill(d) {
   return `<span class="dfi-pill" style="background:${col}20;color:${col}">${d}</span>`;
 }
 
+// ── Sort plugins: blanks/dashes always last regardless of sort direction ───────
+// Numeric type: used for Amount (col 8) and Year (col 10)
+$.fn.dataTable.ext.type.order['num-blanks-last-pre'] = function(d) {
+  if (d === null || d === undefined) return null;
+  if (typeof d === 'number') return d;
+  var n = parseFloat(String(d).replace(/[^0-9.\-]/g, ''));
+  return isNaN(n) ? null : n;
+};
+$.fn.dataTable.ext.type.order['num-blanks-last-asc'] = function(a, b) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+};
+$.fn.dataTable.ext.type.order['num-blanks-last-desc'] = function(a, b) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b - a;
+};
+
+// String type: used for all text columns — strips HTML tags, puts '—'/empty last
+$.fn.dataTable.ext.type.order['str-blanks-last-pre'] = function(d) {
+  var s = String(d === null || d === undefined ? '' : d).replace(/<[^>]*>/g, '').trim();
+  return (s === '' || s === '—' || s === 'nan') ? null : s.toLowerCase();
+};
+$.fn.dataTable.ext.type.order['str-blanks-last-asc'] = function(a, b) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+$.fn.dataTable.ext.type.order['str-blanks-last-desc'] = function(a, b) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a > b ? -1 : a < b ? 1 : 0;
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 function buildTableRows(data) {
   return data.map(r => {
     const amt = r._amount ? '$' + (r._amount/1e6).toFixed(2) + 'M' : '—';
@@ -803,9 +843,11 @@ function buildTableRows(data) {
         ? `<span style="font-size:.72rem;background:#1e3a5f20;color:#3b82f6;padding:.1rem .35rem;border-radius:.25rem;">${escHtml(r.fund_focus_sector)}</span>`
         : '—',
       escHtml(r.investment_type_standardized || r.investment_type || '—'),
-      `<span class="amount-cell">${amt}</span>`,
+      // Amount: pass numeric sort value separately so blanks sort last correctly
+      {_: `<span class="amount-cell">${amt}</span>`, sort: r._amount !== null ? r._amount : null},
       statusBadge(r.status_standardized),
-      r._year || '—',
+      // Year: pass numeric sort value separately
+      {_: r._year || '—', sort: r._year || null},
       escHtml(r.date_added || '—'),
     ];
   });
@@ -829,8 +871,10 @@ function updateTable() {
       dom: '<"d-flex align-items-center gap-2 mb-2"lf>t<"d-flex align-items-center justify-content-between mt-2"ip>',
       language: { search: '', searchPlaceholder: 'Filter table…', lengthMenu: 'Show _MENU_' },
       columnDefs: [
-        { targets: 8, className: 'amount-cell' },
-        { targets: [0,6,9,10], searchable: false },
+        { targets: 8, className: 'amount-cell', type: 'num-blanks-last' },
+        { targets: 10, type: 'num-blanks-last' },
+        { targets: [1,2,3,4,5,6,7,11], type: 'str-blanks-last' },
+        { targets: [0,9], searchable: false },
       ],
       drawCallback() {
         // Clicking a row country filters the map
