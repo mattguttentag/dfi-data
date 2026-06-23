@@ -253,6 +253,9 @@
   </div>
   <div class="ms-auto">
     <span class="subtitle" id="header-subtitle">Loading…</span>
+    <button id="btn-export-csv" class="btn btn-sm btn-outline-light" onclick="exportCSV()" title="Download filtered data as CSV">
+      <i class="bi bi-download me-1"></i>CSV
+    </button>
   </div>
 </header>
 
@@ -1014,6 +1017,43 @@ function resetFilters() {
   document.getElementById('excl-gtfp').checked = true;
   document.getElementById('excl-multi').checked = false;
   applyFilters();
+}
+
+// ============================================================
+// CSV Export
+// ============================================================
+function exportCSV() {
+  const cols = [
+    ['DFI',                 r => r.dfi_source],
+    ['Client',              r => r.client_name_canonical || r.client_name || ''],
+    ['Project',             r => r.project_name || ''],
+    ['Country',             r => r.country_standardized || r.country || ''],
+    ['Region',              r => r.region_standardized || r.region || ''],
+    ['Sector',              r => r.sector_standardized || r.sector || ''],
+    ['Investment Type',     r => r.investment_type_standardized || r.investment_type || ''],
+    ['Amount (USD M)',      r => r._amount != null ? (r._amount / 1e6).toFixed(2) : ''],
+    ['Status',              r => r.status_standardized || r.status || ''],
+    ['Year',                r => r._year || ''],
+    ['Date Added',          r => r.date_added || ''],
+    ['Project URL',         r => r.project_url || ''],
+  ];
+
+  const escape = v => {
+    const s = String(v).replace(/"/g, '""');
+    return /[",\n\r]/.test(s) ? `"${s}"` : s;
+  };
+
+  const header = cols.map(([h]) => h).join(',');
+  const rows = filteredData.map(r => cols.map(([, fn]) => escape(fn(r))).join(','));
+  const csv = [header, ...rows].join('\r\n');
+
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `DFI_transactions_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ============================================================
