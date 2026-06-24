@@ -419,6 +419,7 @@
 <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
@@ -504,13 +505,58 @@ const DFI_COLORS = {
 };
 
 // ============================================================
+// ISO 3166-1 numeric → country_standardized name
+// Used to match world-atlas TopoJSON features to our data
+// ============================================================
+const ISO_NUM_NAMES = {
+  4:"Afghanistan",8:"Albania",12:"Algeria",24:"Angola",28:"Antigua and Barbuda",
+  32:"Argentina",51:"Armenia",36:"Australia",31:"Azerbaijan",44:"Bahamas",
+  48:"Bahrain",50:"Bangladesh",52:"Barbados",112:"Belarus",84:"Belize",
+  204:"Benin",64:"Bhutan",68:"Bolivia",70:"Bosnia and Herzegovina",72:"Botswana",
+  76:"Brazil",100:"Bulgaria",854:"Burkina Faso",108:"Burundi",116:"Cambodia",
+  120:"Cameroon",124:"Canada",132:"Cape Verde",140:"Central African Republic",
+  148:"Chad",152:"Chile",156:"China",170:"Colombia",174:"Comoros",
+  178:"Republic of the Congo",180:"Democratic Republic of the Congo",
+  188:"Costa Rica",384:"Côte d'Ivoire",191:"Croatia",192:"Cuba",
+  203:"Czech Republic",262:"Djibouti",214:"Dominican Republic",218:"Ecuador",
+  818:"Egypt",222:"El Salvador",226:"Equatorial Guinea",232:"Eritrea",
+  748:"Eswatini",233:"Estonia",231:"Ethiopia",242:"Fiji",250:"France",
+  266:"Gabon",270:"Gambia",268:"Georgia",288:"Ghana",300:"Greece",
+  308:"Grenada",320:"Guatemala",324:"Guinea",624:"Guinea-Bissau",328:"Guyana",
+  332:"Haiti",340:"Honduras",344:"Hong Kong",348:"Hungary",356:"India",
+  360:"Indonesia",364:"Iran",368:"Iraq",372:"Ireland",376:"Israel",
+  388:"Jamaica",400:"Jordan",398:"Kazakhstan",404:"Kenya",410:"South Korea",
+  414:"Kuwait",417:"Kyrgyzstan",418:"Laos",428:"Latvia",422:"Lebanon",
+  426:"Lesotho",430:"Liberia",434:"Libya",440:"Lithuania",442:"Luxembourg",
+  450:"Madagascar",454:"Malawi",458:"Malaysia",462:"Maldives",466:"Mali",
+  470:"Malta",584:"Marshall Islands",478:"Mauritania",480:"Mauritius",
+  484:"Mexico",498:"Moldova",496:"Mongolia",499:"Montenegro",504:"Morocco",
+  508:"Mozambique",104:"Myanmar",516:"Namibia",524:"Nepal",528:"Netherlands",
+  558:"Nicaragua",562:"Niger",566:"Nigeria",807:"North Macedonia",512:"Oman",
+  586:"Pakistan",275:"Palestine",591:"Panama",598:"Papua New Guinea",
+  600:"Paraguay",604:"Peru",608:"Philippines",616:"Poland",634:"Qatar",
+  642:"Romania",643:"Russia",646:"Rwanda",678:"São Tomé and Príncipe",
+  659:"Saint Kitts and Nevis",662:"Saint Lucia",670:"Saint Vincent and the Grenadines",
+  882:"Samoa",682:"Saudi Arabia",686:"Senegal",688:"Serbia",690:"Seychelles",
+  694:"Sierra Leone",702:"Singapore",90:"Solomon Islands",706:"Somalia",
+  710:"South Africa",728:"South Sudan",724:"Spain",144:"Sri Lanka",
+  729:"Sudan",740:"Suriname",760:"Syria",762:"Tajikistan",834:"Tanzania",
+  764:"Thailand",626:"Timor-Leste",768:"Togo",776:"Tonga",780:"Trinidad and Tobago",
+  788:"Tunisia",792:"Türkiye",795:"Turkmenistan",800:"Uganda",804:"Ukraine",
+  784:"United Arab Emirates",826:"United Kingdom",840:"United States",
+  858:"Uruguay",860:"Uzbekistan",548:"Vanuatu",862:"Venezuela",704:"Vietnam",
+  887:"Yemen",894:"Zambia",716:"Zimbabwe",
+};
+
+// ============================================================
 // State
 // ============================================================
 let allData = [];
 let filteredData = [];
 let dtTable = null;
 let leafletMap = null;
-let circleLayer = null;
+let choroplethLayer = null;
+let worldGeoJSON = null;
 let tsInstances = {};
 let currentTab = 'table';
 
@@ -887,93 +933,133 @@ function updateTable() {
 }
 
 // ============================================================
-// Map
+// Map — choropleth
 // ============================================================
-function initMap() {
+function getChoroColor(amount) {
+  if (!amount || amount <= 0) return '#e8edf2';
+  if (amount < 1e7)  return '#dbeafe';   // < $10M
+  if (amount < 1e8)  return '#93c5fd';   // < $100M
+  if (amount < 5e8)  return '#60a5fa';   // < $500M
+  if (amount < 1e9)  return '#3b82f6';   // < $1B
+  if (amount < 5e9)  return '#2563eb';   // < $5B
+  if (amount < 1e10) return '#1d4ed8';   // < $10B
+  return '#1e3a8a';                       // ≥ $10B
+}
+
+function buildAgg() {
+  const agg = {};
+  filteredData.forEach(r => {
+    const countries = r.is_multi_country === 'True'
+      ? getCountryValue(r).split(';').map(s => s.trim()).filter(Boolean)
+      : [getCountryValue(r)].filter(Boolean);
+    countries.forEach(c => {
+      if (!c || c.startsWith('Multiple')) return;
+      if (!agg[c]) agg[c] = { count: 0, amount: 0, sectors: {}, dfis: new Set(), region: r.region_standardized || '' };
+      agg[c].count++;
+      if (r._amount) agg[c].amount += r._amount;
+      const sec = r.sector_standardized || 'Other';
+      agg[c].sectors[sec] = (agg[c].sectors[sec] || 0) + 1;
+      if (r.dfi_source) agg[c].dfis.add(r.dfi_source);
+    });
+  });
+  return agg;
+}
+
+function makePopupHtml(country, data) {
+  const topSec = Object.entries(data.sectors).sort((a, b) => b[1] - a[1])[0];
+  return `
+    <h6 style="margin-bottom:.4rem">${country}</h6>
+    <div class="popup-row"><span class="popup-label">Transactions</span><span class="popup-val">${fmtNum(data.count)}</span></div>
+    <div class="popup-row"><span class="popup-label">Investment Total</span><span class="popup-val">${fmtAmount(data.amount)}</span></div>
+    <div class="popup-row"><span class="popup-label">Top Sector</span><span class="popup-val">${topSec ? topSec[0] : '—'}</span></div>
+    <div class="popup-row"><span class="popup-label">DFIs</span><span class="popup-val">${Array.from(data.dfis).join(', ')}</span></div>
+    <div style="margin-top:.4rem">
+      <button class="btn btn-sm btn-primary w-100" style="font-size:.73rem"
+        onclick="filterByCountry('${country.replace(/'/g, "\\'")}')">Filter to ${country}</button>
+    </div>`;
+}
+
+async function initMap() {
   if (leafletMap) return;
   leafletMap = L.map('map', { zoomControl: true }).setView([10, 15], 2);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
     attribution: '© <a href="https://carto.com/">CARTO</a> © <a href="https://www.openstreetmap.org/">OSM</a>',
     maxZoom: 19,
   }).addTo(leafletMap);
-  circleLayer = L.layerGroup().addTo(leafletMap);
+
+  choroplethLayer = L.geoJSON(null, {
+    style: { weight: 0.5, color: '#94a3b8', fillColor: '#e8edf2', fillOpacity: 0.85 },
+    onEachFeature(feature, layer) {
+      layer.on({
+        mouseover(e) {
+          e.target.setStyle({ weight: 1.5, color: '#475569', fillOpacity: 0.95 });
+          e.target.bringToFront();
+        },
+        mouseout(e) {
+          choroplethLayer.resetStyle(e.target);
+        },
+      });
+    },
+  }).addTo(leafletMap);
 
   // Legend
   const legend = L.control({ position: 'bottomright' });
   legend.onAdd = () => {
     const div = L.DomUtil.create('div', 'map-legend');
-    div.innerHTML = '<strong style="font-size:.75rem">Region</strong><br>' +
-      Object.entries(REGION_COLORS).map(([r,c]) =>
-        `<span class="legend-dot" style="background:${c}"></span>${r}`
+    const tiers = [
+      ['≥ $10B',    '#1e3a8a'],
+      ['$5B–$10B',  '#1d4ed8'],
+      ['$1B–$5B',   '#2563eb'],
+      ['$500M–$1B', '#3b82f6'],
+      ['$100M–$500M','#60a5fa'],
+      ['$10M–$100M','#93c5fd'],
+      ['< $10M',    '#dbeafe'],
+      ['No data',   '#e8edf2'],
+    ];
+    div.innerHTML = '<strong style="font-size:.75rem">Investment Total</strong><br>' +
+      tiers.map(([label, color]) =>
+        `<span class="legend-dot" style="background:${color};border:1px solid #cbd5e1"></span>${label}`
       ).join('<br>');
     return div;
   };
   legend.addTo(leafletMap);
+
+  // Fetch world TopoJSON and convert to GeoJSON
+  const topo = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json').then(r => r.json());
+  worldGeoJSON = topojson.feature(topo, topo.objects.countries);
+
+  // Initial render now that GeoJSON is ready
+  updateMap();
 }
 
 function updateMap() {
-  initMap();
-  circleLayer.clearLayers();
+  if (!leafletMap) { initMap(); return; }
+  if (!worldGeoJSON) return;  // initMap() will call updateMap() once loaded
 
-  // Aggregate by country_standardized
-  const agg = {};
-  filteredData.forEach(r => {
-    // For multi-country rows, split and credit each country
-    const countries = r.is_multi_country === 'True'
-      ? getCountryValue(r).split(';').map(s=>s.trim()).filter(Boolean)
-      : [getCountryValue(r)].filter(Boolean);
+  const agg = buildAgg();
 
-    countries.forEach(c => {
-      if (c.startsWith('Multiple')) return;  // skip pure regional labels
-      if (!agg[c]) agg[c] = { count:0, amount:0, sectors:{}, dfis:new Set(), region:r.region_standardized||'' };
-      agg[c].count++;
-      if (r._amount) agg[c].amount += r._amount;
-      const sec = r.sector_standardized || 'Other';
-      agg[c].sectors[sec] = (agg[c].sectors[sec]||0) + 1;
-      if (r.dfi_source) agg[c].dfis.add(r.dfi_source);
-    });
-  });
+  choroplethLayer.clearLayers();
+  choroplethLayer.addData(worldGeoJSON);
 
-  // Max amount for scaling
-  const amounts = Object.values(agg).map(a=>a.amount).filter(v=>v>0);
-  const maxAmt  = amounts.length ? Math.max(...amounts) : 1;
+  choroplethLayer.setStyle(feature => ({
+    fillColor: getChoroColor((agg[ISO_NUM_NAMES[feature.id]] || {}).amount),
+    fillOpacity: 0.85,
+    weight: 0.5,
+    color: '#94a3b8',
+  }));
 
-  Object.entries(agg).forEach(([country, data]) => {
-    const coords = COUNTRY_COORDS[country];
-    if (!coords) return;
-
-    const radius = data.amount > 0
-      ? 4 + 28 * Math.sqrt(data.amount / maxAmt)
-      : 4;
-
-    const regionColor = REGION_COLORS[data.region] || '#94a3b8';
-
-    // Top sector
-    const topSec = Object.entries(data.sectors).sort((a,b)=>b[1]-a[1])[0];
-
-    const circle = L.circleMarker(coords, {
-      radius,
-      fillColor: regionColor,
-      fillOpacity: 0.72,
-      color: '#fff',
-      weight: 1.5,
-    });
-
-    const popupHtml = `
-      <h6>${country}</h6>
-      <div class="popup-row"><span class="popup-label">Transactions</span><span class="popup-val">${fmtNum(data.count)}</span></div>
-      <div class="popup-row"><span class="popup-label">Investment Total</span><span class="popup-val">${fmtAmount(data.amount)}</span></div>
-      <div class="popup-row"><span class="popup-label">Top Sector</span><span class="popup-val">${topSec ? topSec[0] : '—'}</span></div>
-      <div class="popup-row"><span class="popup-label">DFIs</span><span class="popup-val">${Array.from(data.dfis).join(', ')}</span></div>
-      <div style="margin-top:.4rem">
-        <button class="btn btn-sm btn-primary w-100" style="font-size:.73rem"
-          onclick="filterByCountry('${country.replace(/'/g,"\\'")}')">Filter to ${country}</button>
-      </div>`;
-
-    circle.bindPopup(popupHtml, { maxWidth: 260 });
-    circle.bindTooltip(`<strong>${country}</strong><br>${fmtNum(data.count)} transactions · ${fmtAmount(data.amount)}`,
-      { sticky: true, offset: [0, -5] });
-    circleLayer.addLayer(circle);
+  choroplethLayer.eachLayer(layer => {
+    const name = ISO_NUM_NAMES[layer.feature.id];
+    const data = name && agg[name];
+    if (data) {
+      layer.bindPopup(makePopupHtml(name, data), { maxWidth: 280 });
+      layer.bindTooltip(
+        `<strong>${name}</strong><br>${fmtNum(data.count)} transactions · ${fmtAmount(data.amount)}`,
+        { sticky: true, offset: [0, -5] }
+      );
+    } else if (name) {
+      layer.bindTooltip(`<strong>${name}</strong><br>No DFI investments recorded`, { sticky: true });
+    }
   });
 
   leafletMap.invalidateSize();
