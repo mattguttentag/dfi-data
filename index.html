@@ -972,7 +972,7 @@ let currentAgg = {};
 
 function choroStyle(feature) {
   return {
-    fillColor:   getChoroColor((currentAgg[ISO_NUM_NAMES[feature.id]] || {}).amount),
+    fillColor:   getChoroColor((currentAgg[ISO_NUM_NAMES[+feature.id]] || {}).amount),
     fillOpacity: 0.85,
     weight:      0.5,
     color:       '#94a3b8',
