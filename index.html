@@ -1018,6 +1018,17 @@ function fixAntimeridian(geojson) {
   return geojson;
 }
 
+// For MultiPolygon countries Leaflet creates a FeatureGroup whose child
+// Polygon layers receive the actual mouse events — not the group itself.
+// This helper calls fn on every leaf Polygon, regardless of nesting.
+function forEachLeafLayer(layer, fn) {
+  if (typeof layer.getLayers === 'function') {
+    layer.getLayers().forEach(child => forEachLeafLayer(child, fn));
+  } else {
+    fn(layer);
+  }
+}
+
 // currentAgg is referenced by choroStyle — updated each time filters change
 let currentAgg = {};
 
@@ -1075,14 +1086,18 @@ async function initMap() {
   choroplethLayer = L.geoJSON(null, {
     style: choroStyle,
     onEachFeature(feature, layer) {
-      layer.on({
-        mouseover(e) {
-          e.target.setStyle({ weight: 2, color: '#1e293b', fillOpacity: 1 });
-          e.target.bringToFront();
-        },
-        mouseout(e) {
-          choroplethLayer.resetStyle(e.target);
-        },
+      // For MultiPolygon countries Leaflet creates a FeatureGroup whose
+      // child Polygon layers receive the actual SVG mouse events.
+      // Attach handlers to each leaf; highlight/reset the parent so
+      // all sub-polygons (e.g. Cabinda, islands) change together.
+      forEachLeafLayer(layer, leaf => {
+        leaf.on({
+          mouseover() {
+            layer.setStyle({ weight: 2, color: '#1e293b', fillOpacity: 1 });
+            if (layer.bringToFront) layer.bringToFront();
+          },
+          mouseout() { choroplethLayer.resetStyle(layer); },
+        });
       });
     },
   }).addTo(leafletMap);
@@ -1125,19 +1140,24 @@ function updateMap() {
   choroplethLayer.setStyle(choroStyle);
 
   choroplethLayer.eachLayer(layer => {
-    const name = ISO_NUM_NAMES[layer.feature.id];
+    const name = ISO_NUM_NAMES[+layer.feature.id];
     const data = currentAgg[name];
-    layer.unbindTooltip();
-    layer.unbindPopup();
-    if (data) {
-      layer.bindPopup(makePopupHtml(name, data), { maxWidth: 280 });
-      layer.bindTooltip(
-        `<strong>${name}</strong><br>${fmtNum(data.count)} transactions · ${fmtAmount(data.amount)}`,
-        { sticky: true, offset: [0, -5] }
-      );
-    } else if (name) {
-      layer.bindTooltip(`<strong>${name}</strong><br>No DFI investments recorded`, { sticky: true });
-    }
+    // Bind tooltip/popup to each leaf so sticky tooltips and popups
+    // work on MultiPolygon countries (FeatureGroup children receive
+    // the actual mouse events, not the FeatureGroup itself).
+    forEachLeafLayer(layer, leaf => {
+      leaf.unbindTooltip();
+      leaf.unbindPopup();
+      if (data) {
+        leaf.bindPopup(makePopupHtml(name, data), { maxWidth: 280 });
+        leaf.bindTooltip(
+          `<strong>${name}</strong><br>${fmtNum(data.count)} transactions · ${fmtAmount(data.amount)}`,
+          { sticky: true, offset: [0, -5] }
+        );
+      } else if (name) {
+        leaf.bindTooltip(`<strong>${name}</strong><br>No DFI investments recorded`, { sticky: true });
+      }
+    });
   });
 
   leafletMap.invalidateSize();
