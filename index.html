@@ -167,6 +167,7 @@
       box-shadow: 0 1px 4px rgba(0,0,0,.15);
     }
     .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+    .map-metric-toggle { background: rgba(255,255,255,.92); padding: .3rem; border-radius: .4rem; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 
     /* Sidebar toggle */
     #sidebar-toggle { background: none; border: none; color: #93c5fd; font-size: 1.2rem; cursor: pointer; padding: .1rem .3rem; }
@@ -557,6 +558,8 @@ let dtTable = null;
 let leafletMap = null;
 let choroplethLayer = null;
 let worldGeoJSON = null;
+let mapMetric = 'amount';
+let legendDiv = null;
 let tsInstances = {};
 let currentTab = 'table';
 
@@ -946,6 +949,54 @@ function getChoroColor(amount) {
   return '#1e3a8a';
 }
 
+function getCountColor(count) {
+  if (!count || count <= 0) return '#e8edf2';
+  if (count < 5)   return '#dbeafe';
+  if (count < 20)  return '#93c5fd';
+  if (count < 50)  return '#60a5fa';
+  if (count < 100) return '#3b82f6';
+  if (count < 250) return '#2563eb';
+  if (count < 500) return '#1d4ed8';
+  return '#1e3a8a';
+}
+
+function getLegendHtml() {
+  const tiers = mapMetric === 'amount' ? [
+    ['≥ $10B',      '#1e3a8a'],
+    ['$5B–$10B',    '#1d4ed8'],
+    ['$1B–$5B',     '#2563eb'],
+    ['$500M–$1B',   '#3b82f6'],
+    ['$100M–$500M', '#60a5fa'],
+    ['$10M–$100M',  '#93c5fd'],
+    ['< $10M',      '#dbeafe'],
+    ['No data',     '#e8edf2'],
+  ] : [
+    ['≥ 500 deals',   '#1e3a8a'],
+    ['250–499',       '#1d4ed8'],
+    ['100–249',       '#2563eb'],
+    ['50–99',         '#3b82f6'],
+    ['20–49',         '#60a5fa'],
+    ['5–19',          '#93c5fd'],
+    ['1–4',           '#dbeafe'],
+    ['No data',       '#e8edf2'],
+  ];
+  const title = mapMetric === 'amount' ? 'Investment Total' : 'Number of Deals';
+  return `<strong style="font-size:.75rem">${title}</strong><br>` +
+    tiers.map(([label, color]) =>
+      `<span class="legend-dot" style="background:${color};border:1px solid #cbd5e1"></span>${label}`
+    ).join('<br>');
+}
+
+function setMapMetric(metric) {
+  mapMetric = metric;
+  document.getElementById('toggle-amount').className =
+    'btn btn-sm ' + (metric === 'amount' ? 'btn-primary' : 'btn-outline-secondary');
+  document.getElementById('toggle-count').className =
+    'btn btn-sm ' + (metric === 'count' ? 'btn-primary' : 'btn-outline-secondary');
+  if (legendDiv) legendDiv.innerHTML = getLegendHtml();
+  if (choroplethLayer) choroplethLayer.setStyle(choroStyle);
+}
+
 // Fix antimeridian-crossing polygons (Russia, Fiji, etc.) so Leaflet
 // doesn't draw a horizontal line across the map. Shifts each vertex
 // by ±360° to stay within 180° of the previous vertex.
@@ -971,12 +1022,11 @@ function fixAntimeridian(geojson) {
 let currentAgg = {};
 
 function choroStyle(feature) {
-  return {
-    fillColor:   getChoroColor((currentAgg[ISO_NUM_NAMES[+feature.id]] || {}).amount),
-    fillOpacity: 0.85,
-    weight:      0.5,
-    color:       '#94a3b8',
-  };
+  const d = currentAgg[ISO_NUM_NAMES[+feature.id]];
+  const fillColor = mapMetric === 'count'
+    ? getCountColor(d ? d.count : 0)
+    : getChoroColor(d ? d.amount : 0);
+  return { fillColor, fillOpacity: 0.85, weight: 0.5, color: '#94a3b8' };
 }
 
 function buildAgg() {
@@ -1037,25 +1087,25 @@ async function initMap() {
     },
   }).addTo(leafletMap);
 
+  // Metric toggle
+  const toggle = L.control({ position: 'topright' });
+  toggle.onAdd = () => {
+    const div = L.DomUtil.create('div', 'map-metric-toggle');
+    div.innerHTML = `<div class="btn-group btn-group-sm">
+      <button id="toggle-amount" class="btn btn-sm btn-primary"          onclick="setMapMetric('amount')">$ Volume</button>
+      <button id="toggle-count"  class="btn btn-sm btn-outline-secondary" onclick="setMapMetric('count')"># Deals</button>
+    </div>`;
+    L.DomEvent.disableClickPropagation(div);
+    return div;
+  };
+  toggle.addTo(leafletMap);
+
   // Legend
   const legend = L.control({ position: 'bottomright' });
   legend.onAdd = () => {
-    const div = L.DomUtil.create('div', 'map-legend');
-    const tiers = [
-      ['≥ $10B',     '#1e3a8a'],
-      ['$5B–$10B',   '#1d4ed8'],
-      ['$1B–$5B',    '#2563eb'],
-      ['$500M–$1B',  '#3b82f6'],
-      ['$100M–$500M','#60a5fa'],
-      ['$10M–$100M', '#93c5fd'],
-      ['< $10M',     '#dbeafe'],
-      ['No data',    '#e8edf2'],
-    ];
-    div.innerHTML = '<strong style="font-size:.75rem">Investment Total</strong><br>' +
-      tiers.map(([label, color]) =>
-        `<span class="legend-dot" style="background:${color};border:1px solid #cbd5e1"></span>${label}`
-      ).join('<br>');
-    return div;
+    legendDiv = L.DomUtil.create('div', 'map-legend');
+    legendDiv.innerHTML = getLegendHtml();
+    return legendDiv;
   };
   legend.addTo(leafletMap);
 
